@@ -50,6 +50,7 @@ import {
   BarChart3,
   GitCompareArrows,
   Check,
+  FileDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
@@ -63,6 +64,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
+import jsPDF from 'jspdf';
 
 type TestType = 'lactato' | 'tiempo' | 'metros';
 
@@ -146,6 +148,7 @@ export function TestPage() {
   // Compare dialog state
   const [compareTestId, setCompareTestId] = useState<string | null>(null);
   const [compareSelectedRowers, setCompareSelectedRowers] = useState<Set<string>>(new Set());
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   const COMPARE_COLORS = ['#ef4444', '#3b82f6', '#22c55e', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316', '#14b8a6', '#6366f1'];
 
@@ -163,6 +166,257 @@ export function TestPage() {
 
   const roundTick = (value: number) =>
     Number.isInteger(value) ? value.toString() : parseFloat(value.toFixed(1)).toString();
+
+  // ── PDF Export ──
+  const handleExportPdf = (result: TestResult) => {
+    const rower = getRower(result.rower_id);
+    const rowerName = rower?.first_name || 'Remero';
+    const escalones = (result.escalones || []).filter((e) => e.watts > 0).sort((a, b) => a.watts - b.watts);
+    const threshold = calcThreshold(result.escalones || [], rower?.weight ?? null);
+    const testInfo = tests.find((t) => t.id === result.test_id);
+
+    setIsExportingPdf(true);
+    try {
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = pdf.internal.pageSize.getWidth();
+      let y = 20;
+
+      // Title
+      pdf.setFontSize(18);
+      pdf.setFont('helvetica', 'bold');
+      pdf.text('Curva de Lactato', pageW / 2, y, { align: 'center' });
+      y += 10;
+
+      // Rower name
+      pdf.setFontSize(14);
+      pdf.setFont('helvetica', 'normal');
+      pdf.text(rowerName, pageW / 2, y, { align: 'center' });
+      y += 8;
+
+      // Test info
+      if (testInfo) {
+        pdf.setFontSize(10);
+        pdf.setTextColor(100);
+        const dateStr = new Date(testInfo.date).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' });
+        const infoLine = `${testInfo.name}  -  ${dateStr}  -  Serie: ${testInfo.serie_value} min  -  Descanso: ${testInfo.descanso_value}s`;
+        pdf.text(infoLine, pageW / 2, y, { align: 'center' });
+        pdf.setTextColor(0);
+        y += 12;
+      }
+
+      // ── Draw chart with jsPDF ──
+      if (escalones.length >= 2) {
+        const chartX = 30;
+        const chartW = pageW - 60;
+        const chartH = 80;
+        const chartY = y;
+
+        const wattsArr = escalones.map((e) => e.watts);
+        const lacArr = escalones.map((e) => e.lactato);
+        const [xMin, xMax] = niceXDomain(Math.min(...wattsArr), Math.max(...wattsArr));
+        const [yMin, yMax] = niceYDomain(Math.min(...lacArr, 0), Math.max(...lacArr, 4.5));
+
+        const toX = (w: number) => chartX + ((w - xMin) / (xMax - xMin)) * chartW;
+        const toY = (l: number) => chartY + chartH - ((l - yMin) / (yMax - yMin)) * chartH;
+
+        // Chart background
+        pdf.setFillColor(252, 252, 252);
+        pdf.rect(chartX, chartY, chartW, chartH, 'F');
+
+        // Grid lines (horizontal)
+        pdf.setDrawColor(230);
+        pdf.setLineWidth(0.2);
+        const yStep = (yMax - yMin) <= 8 ? 1 : 2;
+        for (let lv = Math.ceil(yMin); lv <= yMax; lv += yStep) {
+          const py = toY(lv);
+          pdf.line(chartX, py, chartX + chartW, py);
+          pdf.setFontSize(7);
+          pdf.setFont('helvetica', 'normal');
+          pdf.setTextColor(120);
+          pdf.text(`${lv}`, chartX - 2, py + 1, { align: 'right' });
+        }
+        // Grid lines (vertical)
+        const xStep = (xMax - xMin) <= 200 ? 25 : 50;
+        for (let wv = Math.ceil(xMin / xStep) * xStep; wv <= xMax; wv += xStep) {
+          const px = toX(wv);
+          pdf.line(px, chartY, px, chartY + chartH);
+          pdf.setFontSize(7);
+          pdf.setTextColor(120);
+          pdf.text(`${wv}`, px, chartY + chartH + 4, { align: 'center' });
+        }
+
+        // Axis border
+        pdf.setDrawColor(180);
+        pdf.setLineWidth(0.3);
+        pdf.line(chartX, chartY, chartX, chartY + chartH);
+        pdf.line(chartX, chartY + chartH, chartX + chartW, chartY + chartH);
+
+        // Axis labels
+        pdf.setFontSize(8);
+        pdf.setTextColor(80);
+        pdf.text('Watts', chartX + chartW / 2, chartY + chartH + 9, { align: 'center' });
+        pdf.text('mmol/L', chartX - 8, chartY + chartH / 2, { align: 'center', angle: 90 });
+
+        // Reference line at 4 mmol/L
+        if (yMin < 4 && yMax > 4) {
+          pdf.setDrawColor(245, 158, 11);
+          pdf.setLineWidth(0.4);
+          const refY = toY(4);
+          // Dashed line
+          for (let dx = chartX; dx < chartX + chartW; dx += 4) {
+            pdf.line(dx, refY, Math.min(dx + 2, chartX + chartW), refY);
+          }
+          pdf.setFontSize(6);
+          pdf.setTextColor(200, 130, 0);
+          pdf.text('4 mmol/L', chartX + chartW + 1, refY + 1);
+        }
+
+        // Threshold vertical reference line
+        if (threshold?.watts && threshold.watts > xMin && threshold.watts < xMax) {
+          pdf.setDrawColor(245, 158, 11);
+          pdf.setLineWidth(0.4);
+          const refX = toX(threshold.watts);
+          for (let dy = chartY; dy < chartY + chartH; dy += 4) {
+            pdf.line(refX, dy, refX, Math.min(dy + 2, chartY + chartH));
+          }
+        }
+
+        // Draw smooth curve connecting data points (Catmull-Rom spline)
+        pdf.setDrawColor(239, 68, 68);
+        pdf.setLineWidth(0.7);
+        const pts = escalones.map((esc) => ({ x: toX(esc.watts), y: toY(esc.lactato) }));
+        if (pts.length >= 2) {
+          const curvePoints: { x: number; y: number }[] = [];
+          for (let i = 0; i < pts.length - 1; i++) {
+            const p0 = pts[Math.max(i - 1, 0)];
+            const p1 = pts[i];
+            const p2 = pts[i + 1];
+            const p3 = pts[Math.min(i + 2, pts.length - 1)];
+            const steps = 30;
+            for (let t = 0; t <= steps; t++) {
+              const s = t / steps;
+              const s2 = s * s;
+              const s3 = s2 * s;
+              const x = 0.5 * (
+                (2 * p1.x) +
+                (-p0.x + p2.x) * s +
+                (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * s2 +
+                (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * s3
+              );
+              const y = 0.5 * (
+                (2 * p1.y) +
+                (-p0.y + p2.y) * s +
+                (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * s2 +
+                (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * s3
+              );
+              if (i > 0 && t === 0) continue;
+              curvePoints.push({ x, y });
+            }
+          }
+          for (let i = 1; i < curvePoints.length; i++) {
+            pdf.line(curvePoints[i - 1].x, curvePoints[i - 1].y, curvePoints[i].x, curvePoints[i].y);
+          }
+        }
+
+        // Draw data points
+        escalones.forEach((esc) => {
+          const px = toX(esc.watts);
+          const py = toY(esc.lactato);
+          pdf.setFillColor(255, 255, 255);
+          pdf.setDrawColor(239, 68, 68);
+          pdf.setLineWidth(0.5);
+          pdf.circle(px, py, 1.2, 'FD');
+          pdf.setFillColor(239, 68, 68);
+          pdf.circle(px, py, 0.7, 'F');
+        });
+
+        y = chartY + chartH + 14;
+      }
+
+      // Threshold info
+      pdf.setTextColor(0);
+      if (threshold?.watts) {
+        pdf.setFontSize(12);
+        pdf.setFont('helvetica', 'bold');
+        pdf.setTextColor(180, 120, 0);
+        let thresholdText = `Umbral: ${threshold.watts} W`;
+        if (threshold.wPerKg) thresholdText += `  |  ${threshold.wPerKg} W/kg`;
+        if (rower?.weight) thresholdText += `  (${rower.weight} kg)`;
+        pdf.text(thresholdText, pageW / 2, y, { align: 'center' });
+        pdf.setTextColor(0);
+        y += 10;
+      } else if (threshold?.allBelow) {
+        pdf.setFontSize(10);
+        pdf.setTextColor(34, 139, 34);
+        pdf.text('Todos los escalones por debajo del umbral de 4 mmol/L', pageW / 2, y, { align: 'center' });
+        pdf.setTextColor(0);
+        y += 10;
+      } else if (threshold?.allAbove) {
+        pdf.setFontSize(10);
+        pdf.setTextColor(200, 0, 0);
+        pdf.text('Todos los escalones por encima del umbral de 4 mmol/L', pageW / 2, y, { align: 'center' });
+        pdf.setTextColor(0);
+        y += 10;
+      }
+
+      // Data table
+      const tableX = 40;
+      const colW = [30, 40, 45];
+      const totalW = colW[0] + colW[1] + colW[2];
+      const headers = ['Escalon', 'Watts', 'Lactato (mmol/L)'];
+
+      // Table header
+      pdf.setFillColor(240, 240, 240);
+      pdf.rect(tableX, y, totalW, 8, 'F');
+      pdf.setFontSize(9);
+      pdf.setFont('helvetica', 'bold');
+      pdf.setTextColor(60);
+      headers.forEach((h, i) => {
+        const cx = tableX + colW.slice(0, i).reduce((a, b) => a + b, 0) + colW[i] / 2;
+        pdf.text(h, cx, y + 5.5, { align: 'center' });
+      });
+      y += 8;
+
+      // Table rows
+      pdf.setFont('helvetica', 'normal');
+      pdf.setFontSize(10);
+      escalones.forEach((esc, idx) => {
+        if (y > 270) { pdf.addPage(); y = 20; }
+        pdf.setDrawColor(220);
+        pdf.line(tableX, y, tableX + totalW, y);
+
+        const rowH = 7;
+        const vals = [`${idx + 1}`, `${esc.watts} W`, `${parseFloat(esc.lactato.toFixed(2))} mmol/L`];
+
+        vals.forEach((v, i) => {
+          const cx = tableX + colW.slice(0, i).reduce((a, b) => a + b, 0) + colW[i] / 2;
+          if (i === 2 && esc.lactato >= 4) pdf.setTextColor(220, 50, 50);
+          else pdf.setTextColor(0);
+          pdf.text(v, cx, y + 5, { align: 'center' });
+        });
+        pdf.setTextColor(0);
+        y += rowH;
+      });
+
+      // Bottom border
+      pdf.setDrawColor(220);
+      pdf.line(tableX, y, tableX + totalW, y);
+
+      // Footer
+      y += 12;
+      pdf.setFontSize(8);
+      pdf.setTextColor(150);
+      pdf.text(`TraineraPro  -  ${new Date().toLocaleDateString('es-ES')}`, pageW / 2, y, { align: 'center' });
+
+      pdf.save(`lactato_${rowerName.replace(/\s+/g, '_').toLowerCase()}.pdf`);
+      toast.success('PDF exportado correctamente');
+    } catch (err) {
+      console.error('Error exporting PDF:', err);
+      toast.error('Error al exportar el PDF');
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
 
   useEffect(() => {
     if (user) loadData();
@@ -882,10 +1136,28 @@ export function TestPage() {
       <Dialog open={!!chartResult} onOpenChange={(open) => !open && setChartResult(null)}>
         <DialogContent className="sm:max-w-xl" aria-describedby={undefined}>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-red-500" />
-              Curva de Lactato — {getRower(chartResult?.rower_id ?? '')?.first_name || ''}
-            </DialogTitle>
+            <div className="flex items-center justify-between">
+              <DialogTitle className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-red-500" />
+                Curva de Lactato — {getRower(chartResult?.rower_id ?? '')?.first_name || ''}
+              </DialogTitle>
+              {chartResult && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 mr-6"
+                  disabled={isExportingPdf}
+                  onClick={() => handleExportPdf(chartResult)}
+                >
+                  {isExportingPdf ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <FileDown className="w-3.5 h-3.5" />
+                  )}
+                  PDF
+                </Button>
+              )}
+            </div>
           </DialogHeader>
           {chartResult && (() => {
             const rower = getRower(chartResult.rower_id);

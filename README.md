@@ -1,7 +1,7 @@
 
-  # Markel Proiektua
+  # TraineraPro
 
-  This is a code bundle for Markel Proiektua. The original project is available at https://www.figma.com/design/n6l1rABOz3JKzLRF27Xmvt/Markel-Proiektua.
+  This is a code bundle for TraineraPro. The original project is available at https://www.figma.com/design/n6l1rABOz3JKzLRF27Xmvt/TraineraPro.
 
   ## Running the code
 
