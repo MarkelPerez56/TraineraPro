@@ -60,14 +60,38 @@ interface Lineup {
   created_at: string;
 }
 
+interface WeightEntry {
+  id: string;
+  rower_id: string;
+  date: string;
+  weight: number;
+}
+
 const ESTRIBOR_COUNT = 6;
 const BABOR_COUNT = 7;
+
+/** Get the weight in effect for a rower at a given date (most recent entry on or before that date) */
+function getWeightAtDate(
+  weightEntries: WeightEntry[],
+  rowerId: string,
+  targetDate: string
+): number | null {
+  // weightEntries sorted ascending by date, may contain entries for multiple rowers
+  let result: number | null = null;
+  for (const entry of weightEntries) {
+    if (entry.rower_id === rowerId && entry.date <= targetDate) {
+      result = entry.weight;
+    }
+  }
+  return result;
+}
 
 export function LineupsPage() {
   const { user } = useAuth();
 
   const [rowers, setRowers] = useState<Rower[]>([]);
   const [lineups, setLineups] = useState<Lineup[]>([]);
+  const [weightEntries, setWeightEntries] = useState<WeightEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingLineup, setEditingLineup] = useState<Lineup | null>(null);
@@ -89,6 +113,7 @@ export function LineupsPage() {
     if (user) {
       loadRowers();
       loadLineups();
+      loadWeightEntries();
     }
   }, [user]);
 
@@ -114,6 +139,17 @@ export function LineupsPage() {
     if (error) console.error('Error loading lineups:', error);
     else setLineups(data ?? []);
     setIsLoading(false);
+  };
+
+  const loadWeightEntries = async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from('weight_entries')
+      .select('*')
+      .eq('coach_id', user.id)
+      .order('date', { ascending: true });
+    if (error) console.error('Error loading weight entries:', error);
+    else setWeightEntries(data ?? []);
   };
 
   const openNewDialog = () => {
@@ -177,7 +213,8 @@ export function LineupsPage() {
     if (!id) return undefined;
     return rowers.find((r) => r.id === id);
   };
-  const getRowerWeight = (id: string | null): number => getRower(id)?.weight ?? 0;
+  const getWeightForId = (id: string | null, date: string): number =>
+    getWeightAtDate(weightEntries, id ?? '', date) ?? 0;
   const getRowerAge = (id: string | null): number => getRower(id)?.age ?? 0;
 
   const selectedRowerIds = useMemo(() => {
@@ -205,10 +242,10 @@ export function LineupsPage() {
     });
   };
 
-  const computeStats = (estribor: (string | null)[], babor: (string | null)[]) => {
+  const computeStats = (estribor: (string | null)[], babor: (string | null)[], date: string) => {
     const allIds = [...estribor, ...babor].filter(Boolean) as string[];
-    const weights = allIds.map(getRowerWeight).filter((w) => w > 0);
-    const ages = allIds.map(getRowerAge).filter((a) => a > 0);
+    const weights = allIds.map((id) => getWeightForId(id, date)).filter((w) => w > 0);
+    const ages = allIds.map((id) => getRowerAge(id)).filter((a) => a > 0);
 
     const avgWeight = weights.length > 0
       ? (weights.reduce((s, w) => s + w, 0) / weights.length).toFixed(1)
@@ -218,21 +255,21 @@ export function LineupsPage() {
       : '-';
 
     // Total estribor (all 6)
-    const eWeights = estribor.map(getRowerWeight).filter((w) => w > 0);
+    const eWeights = estribor.map((id) => getWeightForId(id, date)).filter((w) => w > 0);
     const totalEstribor = eWeights.reduce((s, w) => s + w, 0);
 
     // Total babor (only first 6, not position 7)
-    const bWeightsForSum = babor.slice(0, 6).map(getRowerWeight).filter((w) => w > 0);
+    const bWeightsForSum = babor.slice(0, 6).map((id) => getWeightForId(id, date)).filter((w) => w > 0);
     const totalBabor = bWeightsForSum.reduce((s, w) => s + w, 0);
 
     return { avgWeight, avgAge, totalRowers: allIds.length, totalEstribor, totalBabor };
   };
 
-  const computePositionDiffs = (estribor: (string | null)[], babor: (string | null)[]) => {
+  const computePositionDiffs = (estribor: (string | null)[], babor: (string | null)[], date: string) => {
     const diffs: (number | null)[] = [];
     for (let i = 0; i < ESTRIBOR_COUNT; i++) {
-      const eW = getRowerWeight(estribor[i]);
-      const bW = getRowerWeight(babor[i]);
+      const eW = getWeightForId(estribor[i], date);
+      const bW = getWeightForId(babor[i], date);
       if (eW > 0 && bW > 0) diffs.push(bW - eW);
       else diffs.push(null);
     }
@@ -240,8 +277,8 @@ export function LineupsPage() {
   };
 
   /** Render the 4 stat cards for a lineup */
-  const StatsCards = ({ estribor, babor }: { estribor: (string | null)[]; babor: (string | null)[] }) => {
-    const stats = computeStats(estribor, babor);
+  const StatsCards = ({ estribor, babor, date }: { estribor: (string | null)[]; babor: (string | null)[]; date: string }) => {
+    const stats = computeStats(estribor, babor, date);
     return (
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Card>
@@ -373,8 +410,8 @@ export function LineupsPage() {
         <div className="space-y-3">
           {lineups.map((lineup) => {
             const isExpanded = expandedLineups.has(lineup.id);
-            const stats = computeStats(lineup.estribor, lineup.babor);
-            const diffs = computePositionDiffs(lineup.estribor, lineup.babor);
+            const stats = computeStats(lineup.estribor, lineup.babor, lineup.date);
+            const diffs = computePositionDiffs(lineup.estribor, lineup.babor, lineup.date);
 
             return (
               <Card key={lineup.id} className="overflow-hidden">
@@ -427,7 +464,7 @@ export function LineupsPage() {
                 {isExpanded && (
                   <div className="border-t border-border p-4 space-y-4">
                     {/* Stats cards */}
-                    <StatsCards estribor={lineup.estribor} babor={lineup.babor} />
+                    <StatsCards estribor={lineup.estribor} babor={lineup.babor} date={lineup.date} />
 
                     {/* Positions grid */}
                     <div className="grid grid-cols-[1fr_auto_1fr] gap-x-2 gap-y-1.5">
@@ -448,6 +485,8 @@ export function LineupsPage() {
                         const bId = lineup.babor[i];
                         const eRower = getRower(eId);
                         const bRower = getRower(bId);
+                        const eWeight = eId ? getWeightForId(eId, lineup.date) : 0;
+                        const bWeight = bId ? getWeightForId(bId, lineup.date) : 0;
                         const diff = i < ESTRIBOR_COUNT ? diffs[i] : null;
                         const isLast = i === BABOR_COUNT - 1;
 
@@ -465,7 +504,7 @@ export function LineupsPage() {
                                 <>
                                   <p style={{ fontSize: '0.8rem', fontWeight: 600 }}>{eRower.first_name}</p>
                                   <p className="text-green-700" style={{ fontSize: '0.7rem', fontWeight: 500 }}>
-                                    {eRower.weight ? `${eRower.weight} kg` : '-'}
+                                    {eWeight > 0 ? `${eWeight} kg` : '-'}
                                   </p>
                                 </>
                               ) : i < ESTRIBOR_COUNT ? (
@@ -496,7 +535,7 @@ export function LineupsPage() {
                                 <>
                                   <p style={{ fontSize: '0.8rem', fontWeight: 600 }}>{bRower.first_name}</p>
                                   <p className="text-red-700" style={{ fontSize: '0.7rem', fontWeight: 500 }}>
-                                    {bRower.weight ? `${bRower.weight} kg` : '-'}
+                                    {bWeight > 0 ? `${bWeight} kg` : '-'}
                                   </p>
                                   {isLast && (
                                     <p className="text-muted-foreground mt-0.5" style={{ fontSize: '0.55rem' }}>Proel</p>
@@ -651,14 +690,14 @@ export function LineupsPage() {
 
             {/* Live stats & diffs preview */}
             {(() => {
-              const formStats = computeStats(formEstribor, formBabor);
-              const formDiffs = computePositionDiffs(formEstribor, formBabor);
+              const formStats = computeStats(formEstribor, formBabor, formDate);
+              const formDiffs = computePositionDiffs(formEstribor, formBabor, formDate);
               const hasDiffs = formDiffs.some((d) => d != null);
 
               return (
                 <div className="space-y-3">
                   {/* Stat cards */}
-                  <StatsCards estribor={formEstribor} babor={formBabor} />
+                  <StatsCards estribor={formEstribor} babor={formBabor} date={formDate} />
 
                   {/* Position diffs */}
                   {hasDiffs && (

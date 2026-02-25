@@ -46,6 +46,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { LineupPreviewDialog } from './LineupPreviewDialog';
 import {
   format,
   startOfMonth,
@@ -101,6 +102,10 @@ export function CalendarPage() {
 
   // Detail view for selected day
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+
+  // Lineup preview
+  const [previewLineupId, setPreviewLineupId] = useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -438,7 +443,11 @@ export function CalendarPage() {
                                     <Anchor className="w-3 h-3 text-muted-foreground" />
                                     <Badge
                                       variant="secondary"
-                                      className="text-xs"
+                                      className="text-xs cursor-pointer hover:bg-primary/15 hover:text-primary transition-colors"
+                                      onClick={() => {
+                                        setPreviewLineupId(ev.lineup_id);
+                                        setPreviewOpen(true);
+                                      }}
                                     >
                                       {getLineupName(ev.lineup_id)}
                                     </Badge>
@@ -710,6 +719,13 @@ export function CalendarPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Lineup Preview */}
+      <LineupPreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        lineupId={previewLineupId}
+      />
     </div>
   );
 }

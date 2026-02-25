@@ -742,11 +742,9 @@ export function RowerDetailPage() {
                               variant={
                                 diff > 0
                                   ? 'destructive'
-                                  : diff < 0
-                                  ? 'default'
                                   : 'secondary'
                               }
-                              className="text-xs"
+                              className={`text-xs ${diff < 0 ? 'bg-green-500/15 text-green-600 border-green-500/30' : ''}`}
                             >
                               {diff > 0 ? '+' : ''}
                               {diff.toFixed(1)} kg

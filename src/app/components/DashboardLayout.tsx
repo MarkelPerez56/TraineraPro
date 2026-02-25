@@ -13,7 +13,7 @@ import {
   Waves,
   Scale,
   Anchor,
-  CalendarDays,
+  Target,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -41,7 +41,7 @@ export function DashboardLayout() {
     { to: '/dashboard/rowers', icon: Users, label: 'Plantilla', end: false },
     { to: '/dashboard/weigh-ins', icon: Scale, label: 'Pesajes', end: false },
     { to: '/dashboard/lineups', icon: Anchor, label: 'Alineaciones', end: false },
-    { to: '/dashboard/calendar', icon: CalendarDays, label: 'Calendario', end: false },
+    { to: '/dashboard/tests', icon: Target, label: 'Test', end: false },
     { to: '/dashboard/profile', icon: User, label: 'Mi Perfil', end: false },
   ];
 

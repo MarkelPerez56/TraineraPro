@@ -7,7 +7,7 @@ import { RowersPage } from './components/RowersPage';
 import { RowerDetailPage } from './components/RowerDetailPage';
 import { WeighInsPage } from './components/WeighInsPage';
 import { LineupsPage } from './components/LineupsPage';
-import { CalendarPage } from './components/CalendarPage';
+import { TestPage } from './components/TestPage';
 import { ProtectedRoute } from './components/ProtectedRoute';
 
 export const router = createBrowserRouter([
@@ -28,7 +28,7 @@ export const router = createBrowserRouter([
       { path: 'rowers/:id', element: <RowerDetailPage /> },
       { path: 'weigh-ins', element: <WeighInsPage /> },
       { path: 'lineups', element: <LineupsPage /> },
-      { path: 'calendar', element: <CalendarPage /> },
+      { path: 'tests', element: <TestPage /> },
       { path: 'profile', element: <ProfilePage /> },
     ],
   },

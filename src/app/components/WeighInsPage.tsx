@@ -138,12 +138,19 @@ export function WeighInsPage() {
       return;
     }
 
-    // Update rower's current weight
-    await supabase
-      .from('rowers')
-      .update({ weight: weightValue, updated_at: new Date().toISOString() })
-      .eq('id', selectedRowerId)
-      .eq('coach_id', user.id);
+    // Only update rower's current weight if this entry is the most recent by date
+    const rowerEntries = allEntries.filter((e) => e.rower_id === selectedRowerId);
+    const mostRecentDate = rowerEntries.length > 0
+      ? rowerEntries.reduce((max, e) => (e.date > max ? e.date : max), rowerEntries[0].date)
+      : null;
+
+    if (!mostRecentDate || newDate >= mostRecentDate) {
+      await supabase
+        .from('rowers')
+        .update({ weight: weightValue, updated_at: new Date().toISOString() })
+        .eq('id', selectedRowerId)
+        .eq('coach_id', user.id);
+    }
 
     toast.success('Pesaje registrado');
     setNewWeight('');
@@ -167,7 +174,21 @@ export function WeighInsPage() {
       toast.error('Error al eliminar el pesaje');
     } else {
       toast.success('Pesaje eliminado');
+
+      // Recalculate rower's current weight from remaining entries (most recent by date)
+      const remainingEntries = allEntries
+        .filter((e) => e.rower_id === deleteEntry.rower_id && e.id !== deleteEntry.id)
+        .sort((a, b) => b.date.localeCompare(a.date));
+
+      const newCurrentWeight = remainingEntries.length > 0 ? remainingEntries[0].weight : null;
+      await supabase
+        .from('rowers')
+        .update({ weight: newCurrentWeight, updated_at: new Date().toISOString() })
+        .eq('id', deleteEntry.rower_id)
+        .eq('coach_id', user.id);
+
       await loadAllEntries();
+      await loadRowers();
     }
     setDeleteEntry(null);
   };
@@ -199,11 +220,11 @@ export function WeighInsPage() {
     } else {
       toast.success('Pesaje actualizado');
 
-      // If this is the most recent entry for this rower, update rower weight
+      // If this is the most recent entry by date for this rower, update rower weight
       const rowerEntries = allEntries
         .filter((e) => e.rower_id === entry.rower_id)
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      if (rowerEntries[0]?.id === entry.id) {
+        .sort((a, b) => b.date.localeCompare(a.date));
+      if (rowerEntries[0]?.id === entry.id || rowerEntries[0]?.date <= entry.date) {
         await supabase
           .from('rowers')
           .update({ weight: weightValue, updated_at: new Date().toISOString() })
@@ -476,14 +497,14 @@ export function WeighInsPage() {
                                     <TrendingDown className="w-3.5 h-3.5 text-green-500" />
                                   ) : null}
                                   <Badge
-                                    variant={
+                                    variant="secondary"
+                                    className={`text-xs ${
                                       diff > 0
-                                        ? 'destructive'
+                                        ? 'bg-red-500/15 text-red-700 border-red-500/30'
                                         : diff < 0
-                                        ? 'default'
-                                        : 'secondary'
-                                    }
-                                    className="text-xs"
+                                        ? 'bg-green-500/15 text-green-700 border-green-500/30'
+                                        : ''
+                                    }`}
                                   >
                                     {diff > 0 ? '+' : ''}
                                     {diff.toFixed(1)} kg

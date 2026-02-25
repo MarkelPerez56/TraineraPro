@@ -1,13 +1,12 @@
 import { useAuth } from '../context/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Users, Calendar, Weight, ChevronRight, Loader2, Plus, Flag, Clock } from 'lucide-react';
+import { Users, Calendar, Flag, Clock, Loader2, ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { Link, useNavigate } from 'react-router';
-import { Button } from './ui/button';
-import type { Rower } from '../types/rower';
+import { useNavigate } from 'react-router';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import { CalendarPage } from './CalendarPage';
 
 interface CalendarEvent {
   id: string;
@@ -17,48 +16,38 @@ interface CalendarEvent {
   lineup_id: string | null;
 }
 
-const sideLabels: Record<string, string> = {
-  babor: 'Babor',
-  estribor: 'Estribor',
-  ambos: 'Ambos',
-};
-
 export function DashboardHome() {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
-  const [rowers, setRowers] = useState<Rower[]>([]);
+  const [rowerCount, setRowerCount] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [nextEvent, setNextEvent] = useState<CalendarEvent | null>(null);
 
   useEffect(() => {
     if (user) {
-      loadRowers();
-      loadNextEvent();
+      loadStats();
     }
   }, [user]);
 
-  const loadRowers = async () => {
+  const loadStats = async () => {
     if (!user) return;
-    const { data } = await supabase
-      .from('rowers')
-      .select('*')
-      .eq('coach_id', user.id)
-      .order('first_name', { ascending: true });
-    setRowers(data ?? []);
+    setIsLoading(true);
+    const [rowersRes, eventsRes] = await Promise.all([
+      supabase
+        .from('rowers')
+        .select('id', { count: 'exact', head: true })
+        .eq('coach_id', user.id),
+      supabase
+        .from('calendar_events')
+        .select('id, title, date, time, lineup_id')
+        .eq('coach_id', user.id)
+        .gte('date', format(new Date(), 'yyyy-MM-dd'))
+        .order('date', { ascending: true })
+        .limit(1),
+    ]);
+    setRowerCount(rowersRes.count ?? 0);
+    setNextEvent(eventsRes.data && eventsRes.data.length > 0 ? eventsRes.data[0] : null);
     setIsLoading(false);
-  };
-
-  const loadNextEvent = async () => {
-    if (!user) return;
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const { data } = await supabase
-      .from('calendar_events')
-      .select('id, title, date, time, lineup_id')
-      .eq('coach_id', user.id)
-      .gte('date', today)
-      .order('date', { ascending: true })
-      .limit(1);
-    setNextEvent(data && data.length > 0 ? data[0] : null);
   };
 
   return (
@@ -72,8 +61,11 @@ export function DashboardHome() {
 
       {/* Stat cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* Total remeros stat */}
-        <Card>
+        {/* Total remeros stat — clickable */}
+        <Card
+          className="cursor-pointer hover:border-primary/40 hover:shadow-sm transition-all"
+          onClick={() => navigate('/dashboard/rowers')}
+        >
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle style={{ fontSize: '0.875rem' }} className="text-muted-foreground">
               Total Remeros en Plantilla
@@ -83,17 +75,17 @@ export function DashboardHome() {
             </div>
           </CardHeader>
           <CardContent>
-            <p style={{ fontSize: '2rem', fontWeight: 700 }}>
-              {isLoading ? '-' : rowers.length}
-            </p>
+            <div className="flex items-center justify-between">
+              <p style={{ fontSize: '2rem', fontWeight: 700 }}>
+                {isLoading ? '-' : rowerCount}
+              </p>
+              <ChevronRight className="w-5 h-5 text-muted-foreground" />
+            </div>
           </CardContent>
         </Card>
 
         {/* Proximo evento stat */}
-        <Card
-          className="cursor-pointer hover:border-primary/40 hover:shadow-sm transition-all"
-          onClick={() => navigate('/dashboard/calendar')}
-        >
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle style={{ fontSize: '0.875rem' }} className="text-muted-foreground">
               Proximo Evento
@@ -132,80 +124,8 @@ export function DashboardHome() {
         </Card>
       </div>
 
-      {/* Rower cards */}
-      <div>
-        <h2 style={{ fontSize: '1.1rem', fontWeight: 600 }} className="mb-4">Plantilla</h2>
-
-        {isLoading ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
-          </div>
-        ) : rowers.length === 0 ? (
-          <Card>
-            <CardContent className="py-10 text-center">
-              <Users className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-              <p className="text-muted-foreground" style={{ fontSize: '0.875rem' }}>
-                Aun no has anadido ningun remero
-              </p>
-              <Link to="/dashboard/rowers">
-                <Button className="mt-4" size="sm">
-                  <Plus className="w-4 h-4 mr-1" />
-                  Anadir tu primer remero
-                </Button>
-              </Link>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {rowers.map((rower) => (
-              <Card
-                key={rower.id}
-                className="cursor-pointer hover:border-primary/40 hover:shadow-sm transition-all"
-                onClick={() => navigate(`/dashboard/rowers/${rower.id}`)}
-              >
-                <CardContent className="pt-4 pb-4">
-                  <div className="flex items-center gap-3">
-                    {/* Avatar */}
-                    <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                      <span className="text-primary" style={{ fontSize: '1rem', fontWeight: 700 }}>
-                        {rower.first_name.slice(0, 2).toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="truncate" style={{ fontWeight: 600, fontSize: '0.95rem' }}>
-                        {rower.first_name}
-                      </p>
-                      <div
-                        className="flex items-center gap-2 mt-0.5 text-muted-foreground flex-wrap"
-                        style={{ fontSize: '0.75rem' }}
-                      >
-                        {rower.age != null && (
-                          <span className="flex items-center gap-0.5">
-                            <Calendar className="w-3 h-3" />
-                            {rower.age} a.
-                          </span>
-                        )}
-                        {rower.weight && (
-                          <span className="flex items-center gap-0.5">
-                            <Weight className="w-3 h-3" />
-                            {rower.weight} kg
-                          </span>
-                        )}
-                      </div>
-                      {rower.side && (
-                        <p className="text-muted-foreground mt-0.5" style={{ fontSize: '0.7rem' }}>
-                          {sideLabels[rower.side]}
-                        </p>
-                      )}
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Calendario embebido */}
+      <CalendarPage />
     </div>
   );
 }
